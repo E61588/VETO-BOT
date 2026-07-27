@@ -1,0 +1,20 @@
+{
+  "name": "veto-bot-server",
+  "version": "1.0.0",
+  "description": "VETO - Traffic Ticket Appeal Automation bot server (Playwright + Express)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "playwright": "^1.47.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
