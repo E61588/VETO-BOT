@@ -1,105 +1,40 @@
-# VETO Bot Server
+# VETO bot (v2)
 
-Playwright + Express automation server for submitting traffic ticket appeals
-and handling SMS/OTP verification on municipal websites, with webhook
-callbacks to Base44.
+Submits parking-ticket appeals on municipal portals for VETO users.
 
-## Project layout
+- **Human steps stay human.** When a portal shows a reCAPTCHA checkbox, the job
+  pauses and the user ticks it in a live view of the bot's browser inside VETO.
+  When a portal sends an SMS code to the vehicle owner, the user types it in VETO
+  and the bot continues. The bot never solves or bypasses a CAPTCHA.
+- **No guessing.** Each portal family has its own adapter in `adapters/`. A step
+  that is not mapped yet stops the job (`NOT_MAPPED`) and saves the page
+  structure (field names and labels, never values) for mapping.
+- **Live submission is off by default.** Every job stops at `READY_TO_SUBMIT`,
+  after the last screen is filled and before the final button, unless the server
+  has `ALLOW_LIVE_SUBMIT=true` and the job has `submit_live: true`.
 
-```
-server.js            Express app + route handlers
-browserAutomation.js  Playwright logic: form fill, OTP submit, screenshot
-sessionStore.js       In-memory Map of paused browser sessions, keyed by job_id
-webhook.js            Helper for POSTing status updates back to Base44
-authMiddleware.js      x-api-key header check
-config.js             Loads/validates environment variables
-Dockerfile             Based on mcr.microsoft.com/playwright (Chromium preinstalled)
-```
+## Status of portal adapters
 
-## Setup
+| Portal | Authorities | Status |
+|---|---|---|
+| Metropark | Raanana, Petah Tikva, Netanya, Bat Yam, Bnei Brak and others (by AuthorityID) | Step 1 (search with reCAPTCHA in live view) done; step 2 to be mapped |
+| Tel Aviv, Jerusalem | | Not started (OTP identification + invisible reCAPTCHA) |
+| Mileon | Ramat Gan, Herzliya, Givatayim and others | Not started |
+| City4U | Haifa, Rishon LeZion, Beer Sheva | Blocked by the portal's firewall from automated access |
 
-```bash
-npm install
-cp .env.example .env   # then edit BOT_API_KEY
-npm start
-```
+## API (all routes except `/health` need header `x-api-key`)
 
-## Environment variables
+- `POST /api/jobs` (or `/api/submit-appeal`): `{ job_id, portal_url, ticket_number, vehicle_number, driver_details, appeal_letter, attachment_urls, submit_live }`
+- `GET /api/jobs/:id` — status
+- `POST /api/verify-otp` — `{ job_id, otp_code }`
+- `POST /api/jobs/:id/cancel`
+- `GET /api/recon`, `GET /api/recon/:file` — mapped page structure
+- WebSocket `/live?token=<viewer token>` — live view; token is
+  `<jobId>.<exp>.<HMAC-SHA256("viewer:"+BOT_API_KEY, jobId+"."+exp) base64url>`
 
-| Variable                 | Description                                             | Default |
-|---------------------------|-----------------------------------------------------------|---------|
-| `BOT_API_KEY`             | Required value for the `x-api-key` header                | (none)  |
-| `PORT`                    | HTTP port                                                | 3000    |
-| `OTP_SESSION_TIMEOUT_MS`  | How long a paused session waits for OTP before expiring   | 120000  |
-| `WEBHOOK_TIMEOUT_MS`      | Timeout for outbound webhook POSTs                        | 10000   |
+Status updates go to `WEBHOOK_URL` (Base44 `automationWebhook`) with `x-api-key`.
 
-## API
+## Run
 
-All routes below (except `/health`) require header: `x-api-key: <BOT_API_KEY>`
-
-### `POST /api/submit-appeal`
-
-```json
-{
-  "job_id": "abc123",
-  "municipality_url": "https://example-city.gov/appeal",
-  "appeal_letter": "I am appealing this ticket because...",
-  "driver_details": {
-    "id_number": "123456789",
-    "phone": "0501234567",
-    "vehicle_number": "12-345-67",
-    "ticket_number": "TCK-9988"
-  },
-  "webhook_url": "https://base44.example.com/webhooks/veto"
-}
-```
-
-Responds `202 { job_id, status: "PROCESSING" }` immediately, then in the
-background: launches Chromium, fills the form, clicks "Send OTP", stashes
-the live browser/page in memory, and POSTs a webhook with
-`{ status: "AWAITING_OTP" }`. If nothing calls `/api/verify-otp` within
-`OTP_SESSION_TIMEOUT_MS`, the session is closed and a
-`{ status: "EXPIRED" }` webhook is sent instead.
-
-### `POST /api/verify-otp`
-
-```json
-{ "job_id": "abc123", "otp_code": "482913" }
-```
-
-Fills in the OTP, submits, waits for the confirmation screen, extracts a
-confirmation/reference number, screenshots the result to
-`./screenshots/<job_id>.png`, closes the browser, and POSTs a webhook with
-`{ status: "COMPLETED", confirmation_number }` (or `{ status: "FAILED" }`
-on error).
-
-## Adapting to a real municipality site
-
-`browserAutomation.js` uses a list of best-effort CSS/text selectors per
-field (`SELECTORS` at the top of the file) since every municipality's HTML
-differs. For a new municipality, either:
-
-1. Add more candidate selectors to the existing arrays, or
-2. Introduce a per-domain selector-override map keyed by
-   `new URL(municipality_url).hostname` and merge it over the defaults.
-
-## Docker
-
-```bash
-docker build -t veto-bot-server .
-docker run --rm -p 3000:3000 --env-file .env veto-bot-server
-```
-
-The image is based on `mcr.microsoft.com/playwright`, which already bundles
-Chromium and all required OS dependencies — no `playwright install` step
-needed at runtime.
-
-## Notes / production hardening ideas
-
-- Sessions currently live in an in-memory `Map`, so they don't survive a
-  process restart and won't work across multiple server instances. For
-  horizontal scaling, move to a sticky-session load balancer or externalize
-  session state (e.g. Redis + a headless-browser pool service).
-- Consider persisting screenshots to object storage (S3/GCS) rather than
-  local disk if running in an ephemeral container.
-- Add structured logging/monitoring around job status transitions.
+`deploy/user-data.sh` sets up an Ubuntu 24.04 server (AWS Tel Aviv) end to end.
+Locally: `npm install && npx playwright install chromium && npm test`.

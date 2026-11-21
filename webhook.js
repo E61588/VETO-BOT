@@ -1,45 +1,30 @@
 const config = require('./config');
 
-/**
- * POST a status update back to Base44 (or whatever webhook URL was supplied
- * with the job). Failures are logged but never thrown, so a webhook outage
- * never crashes the automation flow.
- */
-async function sendWebhook(webhookUrl, payload) {
-  if (!webhookUrl) {
-    console.warn('[webhook] No webhook_url provided, skipping notification:', payload);
+// Reports a job status to Base44's automationWebhook function.
+// The function authenticates the call with the shared x-api-key.
+// Failures are logged, never thrown: a webhook outage must not crash a job.
+async function report(payload) {
+  if (!config.webhookUrl) {
+    console.warn('[webhook] WEBHOOK_URL not set, skipping', payload.job_id, payload.status);
     return { ok: false, skipped: true };
   }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.webhookTimeoutMs);
-
   try {
-    const response = await fetch(webhookUrl, {
+    const res = await fetch(config.webhookUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        timestamp: new Date().toISOString(),
-        ...payload,
-      }),
-      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', 'x-api-key': config.apiKey },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(config.webhookTimeoutMs),
     });
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      console.error(
-        `[webhook] Non-OK response (${response.status}) from ${webhookUrl}: ${text}`
-      );
-      return { ok: false, status: response.status };
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error(`[webhook] ${res.status} for job ${payload.job_id}: ${text.slice(0, 200)}`);
+      return { ok: false, status: res.status };
     }
-
     return { ok: true };
   } catch (err) {
-    console.error(`[webhook] Failed to notify ${webhookUrl}:`, err.message);
+    console.error(`[webhook] failed for job ${payload.job_id}: ${err.message}`);
     return { ok: false, error: err.message };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
-module.exports = { sendWebhook };
+module.exports = { report };
