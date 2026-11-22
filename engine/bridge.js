@@ -7,9 +7,10 @@ const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 function makeBridge({ url, apiKey, jobId, timeoutMs = 15000, retries = 4 }) {
   if (!url || !apiKey) throw new Error('bridge needs url and apiKey');
 
-  async function call(action, payload = {}) {
+  async function call(action, payload = {}, opts = {}) {
+    const tries = opts.retries ?? retries;
     let lastErr;
-    for (let attempt = 0; attempt <= retries; attempt++) {
+    for (let attempt = 0; attempt <= tries; attempt++) {
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -27,6 +28,7 @@ function makeBridge({ url, apiKey, jobId, timeoutMs = 15000, retries = 4 }) {
         if (err.status && !RETRYABLE.has(err.status)) throw err;
         lastErr = err;
       }
+      if (attempt === tries) break;
       // Network drop or a retryable status: back off and try again.
       await new Promise((r) => setTimeout(r, Math.min(8000, 500 * 2 ** attempt)));
     }

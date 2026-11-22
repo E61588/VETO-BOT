@@ -55,12 +55,51 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
     if (Date.now() - startedAt > TOTAL_TIMEOUT) throw new HumanTimeout('זמן המשימה הכולל הסתיים');
   };
 
+  // Screenshots are sent scaled down (about 40 KB) so they fit in one Base44
+  // record. Taps come back as fractions of the picture, so scale does not
+  // change where a tap lands.
+  let cdp = null;
+  let frameScale = 0.6;
+  let frameQuality = 45;
+  let frameErrors = 0;
+  async function capture(fullPage) {
+    const vp = page.viewportSize() || { width: 1024, height: 900 };
+    let width = vp.width;
+    let height = vp.height;
+    if (fullPage) {
+      const size = await page.evaluate(() => ({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight })).catch(() => null);
+      if (size) { width = Math.min(size.w, 1600); height = Math.min(size.h, 6000); }
+    }
+    try {
+      if (!cdp) cdp = await page.context().newCDPSession(page);
+      const r = await cdp.send('Page.captureScreenshot', {
+        format: 'jpeg',
+        quality: frameQuality,
+        captureBeyondViewport: fullPage,
+        clip: { x: 0, y: 0, width, height, scale: frameScale },
+      });
+      return { data: r.data, w: vp.width, h: vp.height };
+    } catch {
+      const buf = await page.screenshot({ type: 'jpeg', quality: 35, fullPage }).catch(() => null);
+      return buf ? { data: buf.toString('base64'), w: vp.width, h: vp.height } : null;
+    }
+  }
+
   async function sendFrame(fullPage = false) {
     if (!page) return;
-    const buf = await page.screenshot({ type: 'jpeg', quality: 55, fullPage }).catch(() => null);
-    if (!buf) return;
-    const vp = page.viewportSize() || { width: 1024, height: 900 };
-    await bridge.call('frame', { data: buf.toString('base64'), w: vp.width, h: vp.height, full_page: fullPage }).catch(() => {});
+    const shot = await capture(fullPage);
+    if (!shot) return;
+    try {
+      await bridge.call('frame', { data: shot.data, w: shot.w, h: shot.h, full_page: fullPage }, { retries: 1 });
+      if (frameErrors) console.log(`[job ${jobId}] צילום מסך נשלח (${Math.round(shot.data.length / 1024)} KB)`);
+      frameErrors = 0;
+    } catch (err) {
+      frameErrors += 1;
+      console.log(`[job ${jobId}] צילום מסך לא נשלח (${Math.round(shot.data.length / 1024)} KB): ${String(err.message || err).slice(0, 160)}`);
+      // Smaller next time.
+      frameScale = Math.max(0.35, frameScale - 0.1);
+      frameQuality = Math.max(30, frameQuality - 5);
+    }
   }
 
   async function poll() {
