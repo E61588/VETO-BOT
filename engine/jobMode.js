@@ -73,7 +73,10 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
   const adapter = pickAdapter(task.portal_url);
   try {
     if (!adapter) throw new NotMappedYet('אין לבוט תסריט לפורטל הזה');
-    browser = await chromium.launch({ headless: true, args: ['--lang=he-IL'] });
+    // BROWSER_CHANNEL=chrome uses the computer's installed Google Chrome
+    // (local worker on a Mac) instead of Playwright's downloaded Chromium.
+    const channel = process.env.BROWSER_CHANNEL === 'chrome' ? { channel: 'chrome' } : {};
+    browser = await chromium.launch({ headless: true, args: ['--lang=he-IL'], ...channel });
     const context = await browser.newContext({
       locale: 'he-IL', timezoneId: 'Asia/Jerusalem', viewport: { width: 1024, height: 900 },
     });

@@ -31,7 +31,25 @@ process.on('SIGTERM', () => { stopping = true; });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const stamp = () => new Date().toLocaleTimeString('he-IL');
 
+async function browserCheck() {
+  const { chromium } = require('playwright');
+  const channel = process.env.BROWSER_CHANNEL === 'chrome' ? { channel: 'chrome' } : {};
+  const b = await chromium.launch({ headless: true, ...channel });
+  const v = b.version();
+  await b.close();
+  return v;
+}
+
 (async () => {
+  if (!TEST) {
+    try {
+      const v = await browserCheck();
+      console.log(`[${stamp()}] דפדפן תקין (${process.env.BROWSER_CHANNEL === 'chrome' ? 'Google Chrome' : 'Chromium'} ${v})`);
+    } catch (err) {
+      console.error(`[${stamp()}] הדפדפן לא נפתח: ${err.message.split('\n')[0]}`);
+      process.exit(1);
+    }
+  }
   console.log(`[${stamp()}] הבוט של VETO פועל על המחשב הזה (${WORKER}). להפסקה: Ctrl+C או סגירת החלון.`);
   console.log(`[${stamp()}] שליחה סופית: ${process.env.ALLOW_LIVE_SUBMIT === 'true' ? 'מותרת אחרי אישור המשתמש' : 'חסומה (מצב בדיקה)'}`);
   let done = 0;

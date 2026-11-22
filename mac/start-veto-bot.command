@@ -44,7 +44,10 @@ if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ]; then
   touch node_modules
 fi
 
-if [ ! -f runtime/.chromium-ok ]; then
+if [ -d "/Applications/Google Chrome.app" ]; then
+  # Use the Chrome already installed on this Mac: no browser download needed.
+  export BROWSER_CHANNEL=chrome
+elif [ ! -f runtime/.chromium-ok ]; then
   echo "מתקין דפדפן Chromium עבור הבוט (פעם אחת, כמה דקות)..."
   PLAYWRIGHT_BROWSERS_PATH="$PWD/runtime/browsers" npx playwright install chromium || pause_exit 1
   touch runtime/.chromium-ok
