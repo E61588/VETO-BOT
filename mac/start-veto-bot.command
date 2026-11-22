@@ -1,7 +1,7 @@
 #!/bin/bash
 # Starts the VETO bot on this Mac. Double-click to run; close the window to stop.
 # First run installs what it needs inside this folder only (Node, Chromium).
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")" || exit 1; [ -f package.json ] || cd ..
 export PATH="$PWD/runtime/node/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 NODE_DIST="https://nodejs.org/dist/latest-v22.x"
 
