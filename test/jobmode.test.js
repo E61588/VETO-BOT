@@ -59,6 +59,8 @@ function portalHandler(req, res) {
 }
 
 // ── mock bridge (Base44 + the user) ────────────────────────────────────────
+const queue = []; // job ids waiting for the local worker
+const claims = [];
 const jobs = new Map(); // job_id -> { task, behavior, statuses, inputs, otp, confirm, cancel, frames, recon, failPolls }
 function bridgeHandler(req, res) {
   let raw = '';
@@ -67,6 +69,11 @@ function bridgeHandler(req, res) {
     res.setHeader('content-type', 'application/json');
     if (req.headers['x-api-key'] !== API_KEY) { res.statusCode = 401; return res.end('{}'); }
     const b = JSON.parse(raw || '{}');
+    if (b.action === 'claim') {
+      claims.push(b.worker);
+      const next = queue.shift();
+      return res.end(JSON.stringify({ job_id: next || null }));
+    }
     const j = jobs.get(b.job_id);
     if (!j) { res.statusCode = 404; return res.end('{}'); }
     switch (b.action) {
@@ -96,11 +103,11 @@ function bridgeHandler(req, res) {
 
 function listen(server, host) { return new Promise((r) => server.listen(0, host, () => r(server.address().port))); }
 
-function runJob(jobId, env) {
+function runJob(jobId, env, script = 'job.js') {
   return new Promise((resolve) => {
-    const p = spawn(process.execPath, ['job.js'], {
+    const p = spawn(process.execPath, [script], {
       cwd: path.join(__dirname, '..'),
-      env: { ...process.env, BOT_TEST_MODE: '1', JOB_ID: jobId, BOT_V2_API_KEY: API_KEY, ...env },
+      env: { ...process.env, BOT_TEST_MODE: '1', ...(jobId ? { JOB_ID: jobId } : {}), BOT_V2_API_KEY: API_KEY, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let log = '';
@@ -202,6 +209,18 @@ function runJob(jobId, env) {
     setTimeout(() => { jobs.get('job_cancel_10').cancel = true; }, 4000);
     await runJob('job_cancel_10', env(false));
     check('Cancel: stops with CANCELLED', jobs.get('job_cancel_10').error === 'CANCELLED');
+
+    // 11. Local worker: claims queued jobs one at a time and runs each once.
+    addJob('job_wrk_A11', fullTask(), { otp: '4321', confirm: true });
+    addJob('job_wrk_B11', fullTask({ submit_allowed: true }), { otp: '4321', confirm: true });
+    queue.push('job_wrk_A11', 'job_wrk_B11');
+    const s11 = portalState.submits;
+    const r11 = await runJob(null, { ...env(true), WORKER_NAME: 'test-mac', WORKER_MAX_TASKS: '2' }, 'worker.js');
+    const wa = jobs.get('job_wrk_A11').statuses.at(-1);
+    const wb = jobs.get('job_wrk_B11').statuses.at(-1);
+    check('Worker: runs queued jobs in order (test stops, live completes once)',
+      wa === 'READY_TO_SUBMIT' && wb === 'COMPLETED' && portalState.submits === s11 + 1 && r11.code === 0, `(A ${wa}, B ${wb})`);
+    check('Worker: identifies itself when claiming', claims.includes('test-mac'));
   } catch (e) {
     console.error(e);
     results.push(false);

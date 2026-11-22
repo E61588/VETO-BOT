@@ -5,7 +5,7 @@
 const RETRYABLE = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 function makeBridge({ url, apiKey, jobId, timeoutMs = 15000, retries = 4 }) {
-  if (!url || !apiKey || !jobId) throw new Error('bridge needs url, apiKey and jobId');
+  if (!url || !apiKey) throw new Error('bridge needs url and apiKey');
 
   async function call(action, payload = {}) {
     let lastErr;
@@ -14,7 +14,7 @@ function makeBridge({ url, apiKey, jobId, timeoutMs = 15000, retries = 4 }) {
         const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-          body: JSON.stringify({ action, job_id: jobId, ...payload }),
+          body: JSON.stringify({ action, ...(jobId ? { job_id: jobId } : {}), ...payload }),
           signal: AbortSignal.timeout(timeoutMs),
         });
         if (res.ok) return await res.json().catch(() => ({}));
