@@ -10,9 +10,16 @@ pause_exit() { echo; read -r -p "לחץ Enter לסגירה" _; exit "${1:-1}"; }
 if [ ! -f .env ]; then
   echo "הגדרה ראשונה: הדבק כאן את מפתח הבוט (BOT_API_KEY, 40 תווים) ולחץ Enter."
   echo "המפתח לא יוצג על המסך ונשמר רק במחשב הזה."
-  read -r -s key; echo
-  key=$(printf '%s' "$key" | tr -d '[:space:]"')
-  if ! printf '%s' "$key" | grep -Eq '^[A-Za-z0-9_-]{40}$'; then echo "המפתח לא תקין."; pause_exit 1; fi
+  for attempt in 1 2 3; do
+    read -r -s key; echo
+    # Keep only key characters: copying from a chat can add invisible
+    # direction marks, spaces or quotes around the key.
+    key=$(printf '%s' "$key" | LC_ALL=C tr -cd 'A-Za-z0-9_-')
+    if [ ${#key} -eq 40 ]; then break; fi
+    echo "המפתח לא תקין (התקבלו ${#key} תווים מתוך 40). הדבק שוב ולחץ Enter:"
+    key=""
+  done
+  [ -n "$key" ] || pause_exit 1
   ( umask 077; printf 'BRIDGE_URL=https://veto-app.base44.app/functions/botBridge\nBOT_V2_API_KEY=%s\nWORKER_NAME=%s\nALLOW_LIVE_SUBMIT=false\n' "$key" "$(scutil --get ComputerName 2>/dev/null | tr -cd '[:alnum:]-' | cut -c1-40 || echo mac)" > .env )
   unset key
   echo "נשמר."
