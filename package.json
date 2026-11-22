@@ -7,7 +7,8 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node test/selftest.js"
+    "job": "node job.js",
+    "test": "node test/selftest.js && node test/jobmode.test.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -15,5 +16,7 @@
     "playwright": "1.63.0",
     "ws": "^8.18.0"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
