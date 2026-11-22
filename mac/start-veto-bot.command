@@ -8,7 +8,14 @@ NODE_DIST="https://nodejs.org/dist/latest-v22.x"
 pause_exit() { echo; read -r -p "לחץ Enter לסגירה" _; exit "${1:-1}"; }
 
 if [ ! -f .env ]; then
-  echo "חסר קובץ .env בתיקייה $(pwd)"; pause_exit 1
+  echo "הגדרה ראשונה: הדבק כאן את מפתח הבוט (BOT_API_KEY, 40 תווים) ולחץ Enter."
+  echo "המפתח לא יוצג על המסך ונשמר רק במחשב הזה."
+  read -r -s key; echo
+  key=$(printf '%s' "$key" | tr -d '[:space:]"')
+  if ! printf '%s' "$key" | grep -Eq '^[A-Za-z0-9_-]{40}$'; then echo "המפתח לא תקין."; pause_exit 1; fi
+  ( umask 077; printf 'BRIDGE_URL=https://veto-app.base44.app/functions/botBridge\nBOT_V2_API_KEY=%s\nWORKER_NAME=%s\nALLOW_LIVE_SUBMIT=false\n' "$key" "$(scutil --get ComputerName 2>/dev/null | tr -cd '[:alnum:]-' | cut -c1-40 || echo mac)" > .env )
+  unset key
+  echo "נשמר."
 fi
 
 if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 20 ]; then
