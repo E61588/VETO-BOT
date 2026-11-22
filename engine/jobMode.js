@@ -23,6 +23,13 @@ const { NotMappedYet, StopBeforeSubmit, HumanTimeout, Cancelled, pageStructure }
 const ATTACHMENT_HOSTS = ['base44.app', 'base44.com', 'storage.googleapis.com'];
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+// The bot's browser is phone-shaped, so the picture the user sees on a phone
+// is nearly life size and boxes like "I'm not a robot" are big enough to tap.
+// BOT_VIEWPORT=desktop brings back the wide 1024 px window.
+const VIEWPORT = process.env.BOT_VIEWPORT === 'desktop'
+  ? { width: 1024, height: 900 }
+  : { width: 412, height: 780 };
+
 function hostAllowed(raw) {
   try {
     const u = new URL(raw);
@@ -59,11 +66,11 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
   // record. Taps come back as fractions of the picture, so scale does not
   // change where a tap lands.
   let cdp = null;
-  let frameScale = 0.6;
+  let frameScale = VIEWPORT.width <= 600 ? 1 : 0.6;
   let frameQuality = 45;
   let frameErrors = 0;
   async function capture(fullPage) {
-    const vp = page.viewportSize() || { width: 1024, height: 900 };
+    const vp = page.viewportSize() || VIEWPORT;
     let width = vp.width;
     let height = vp.height;
     if (fullPage) {
@@ -97,7 +104,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
       frameErrors += 1;
       console.log(`[job ${jobId}] צילום מסך לא נשלח (${Math.round(shot.data.length / 1024)} KB): ${String(err.message || err).slice(0, 160)}`);
       // Smaller next time.
-      frameScale = Math.max(0.35, frameScale - 0.1);
+      frameScale = Math.max(0.5, frameScale - 0.15);
       frameQuality = Math.max(30, frameQuality - 5);
     }
   }
@@ -117,7 +124,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
     const channel = process.env.BROWSER_CHANNEL === 'chrome' ? { channel: 'chrome' } : {};
     browser = await chromium.launch({ headless: true, args: ['--lang=he-IL'], ...channel });
     const context = await browser.newContext({
-      locale: 'he-IL', timezoneId: 'Asia/Jerusalem', viewport: { width: 1024, height: 900 },
+      locale: 'he-IL', timezoneId: 'Asia/Jerusalem', viewport: VIEWPORT,
     });
     page = await context.newPage();
 

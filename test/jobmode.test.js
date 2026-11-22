@@ -1,5 +1,7 @@
 // Job-mode tests: a mock Base44 bridge (playing the user) + mock portals.
 // Runs real `node job.js` processes, the way Cloud Run will.
+// The mock taps are placed for the wide 1024 px window.
+process.env.BOT_VIEWPORT = process.env.BOT_VIEWPORT || "desktop";
 const http = require('http');
 const { spawn } = require('child_process');
 const path = require('path');
