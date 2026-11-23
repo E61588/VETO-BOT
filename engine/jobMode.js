@@ -68,7 +68,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
   // fields, since one field holds only a few dozen KB.
   // A tap comes back as a fraction of the picture; lastShot maps it back to
   // a point on the page.
-  const MAX_FRAME_CHARS = 440_000;
+  let maxFrameChars = 440_000; // halves after a refused frame
   const MAX_PAGE_HEIGHT = 4000;
   let cdp = null;
   let lastShot = null;
@@ -91,7 +91,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
         captureBeyondViewport: true,
         clip: { x: 0, y: 0, width, height, scale },
       }).catch(() => null);
-      if (r && r.data.length <= MAX_FRAME_CHARS) return { data: r.data, mime: 'image/webp', w: width, h: height };
+      if (r && r.data.length <= maxFrameChars) return { data: r.data, mime: 'image/webp', w: width, h: height };
     }
     return null;
   }
@@ -111,6 +111,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
       frameErrors += 1;
       if (frameErrors <= 3) console.log(`[job ${jobId}] צילום מסך לא נשלח (${Math.round(shot.data.length / 1024)} KB): ${String(err.message || err).slice(0, 160)}`);
       quality = Math.max(35, quality - 10);
+      maxFrameChars = Math.max(40_000, Math.floor(maxFrameChars / 2));
     }
   }
 
