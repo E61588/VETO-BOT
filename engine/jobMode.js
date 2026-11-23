@@ -62,51 +62,68 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
     if (Date.now() - startedAt > TOTAL_TIMEOUT) throw new HumanTimeout('זמן המשימה הכולל הסתיים');
   };
 
-  // Screenshots are sent scaled down (about 40 KB) so they fit in one Base44
-  // record. Taps come back as fractions of the picture, so scale does not
-  // change where a tap lands.
+  // Screenshots: the whole page, at twice the pixel density so text is sharp
+  // on a phone, as WebP. The user scrolls the picture on the phone itself, so
+  // scrolling is instant. botBridge splits a frame across several record
+  // fields, since one field holds only a few dozen KB.
+  // A tap comes back as a fraction of the picture; lastShot maps it back to
+  // a point on the page.
+  const MAX_FRAME_CHARS = 440_000;
+  const MAX_PAGE_HEIGHT = 4000;
   let cdp = null;
-  let frameScale = VIEWPORT.width <= 600 ? 1 : 0.6;
-  let frameQuality = 45;
+  let lastShot = null;
   let frameErrors = 0;
-  async function capture(fullPage) {
+  let quality = 60;
+
+  async function capture() {
     const vp = page.viewportSize() || VIEWPORT;
-    let width = vp.width;
-    let height = vp.height;
-    if (fullPage) {
-      const size = await page.evaluate(() => ({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight })).catch(() => null);
-      if (size) { width = Math.min(size.w, 1600); height = Math.min(size.h, 6000); }
-    }
-    try {
-      if (!cdp) cdp = await page.context().newCDPSession(page);
+    const size = await page.evaluate(() => ({
+      w: Math.max(document.documentElement.scrollWidth, window.innerWidth),
+      h: Math.max(document.documentElement.scrollHeight, window.innerHeight),
+    })).catch(() => ({ w: vp.width, h: vp.height }));
+    const width = Math.min(size.w, 1600);
+    const height = Math.min(size.h, MAX_PAGE_HEIGHT);
+    if (!cdp) cdp = await page.context().newCDPSession(page);
+    for (const scale of [2, 1.5, 1, 0.75]) {
       const r = await cdp.send('Page.captureScreenshot', {
-        format: 'jpeg',
-        quality: frameQuality,
-        captureBeyondViewport: fullPage,
-        clip: { x: 0, y: 0, width, height, scale: frameScale },
-      });
-      return { data: r.data, w: vp.width, h: vp.height };
-    } catch {
-      const buf = await page.screenshot({ type: 'jpeg', quality: 35, fullPage }).catch(() => null);
-      return buf ? { data: buf.toString('base64'), w: vp.width, h: vp.height } : null;
+        format: 'webp',
+        quality,
+        captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width, height, scale },
+      }).catch(() => null);
+      if (r && r.data.length <= MAX_FRAME_CHARS) return { data: r.data, mime: 'image/webp', w: width, h: height };
     }
+    return null;
   }
 
   async function sendFrame(fullPage = false) {
     if (!page) return;
-    const shot = await capture(fullPage);
+    const shot = await capture();
     if (!shot) return;
     try {
-      await bridge.call('frame', { data: shot.data, w: shot.w, h: shot.h, full_page: fullPage }, { retries: 1 });
+      await bridge.call('frame', {
+        data: shot.data, mime: shot.mime, w: shot.w, h: shot.h, full_page: fullPage, scrollable: true,
+      }, { retries: 1 });
+      lastShot = shot;
       if (frameErrors) console.log(`[job ${jobId}] צילום מסך נשלח (${Math.round(shot.data.length / 1024)} KB)`);
       frameErrors = 0;
     } catch (err) {
       frameErrors += 1;
-      console.log(`[job ${jobId}] צילום מסך לא נשלח (${Math.round(shot.data.length / 1024)} KB): ${String(err.message || err).slice(0, 160)}`);
-      // Smaller next time.
-      frameScale = Math.max(0.5, frameScale - 0.15);
-      frameQuality = Math.max(30, frameQuality - 5);
+      if (frameErrors <= 3) console.log(`[job ${jobId}] צילום מסך לא נשלח (${Math.round(shot.data.length / 1024)} KB): ${String(err.message || err).slice(0, 160)}`);
+      quality = Math.max(35, quality - 10);
     }
+  }
+
+  // A tap at (fx, fy) of the last picture: scroll that point into view, click.
+  async function tapAt(fx, fy) {
+    const shot = lastShot || { w: (page.viewportSize() || VIEWPORT).width, h: (page.viewportSize() || VIEWPORT).height };
+    const x = Math.min(Math.max(fx, 0), 1) * shot.w;
+    const y = Math.min(Math.max(fy, 0), 1) * shot.h;
+    const scrollY = await page.evaluate((py) => {
+      window.scrollTo(0, Math.max(0, py - window.innerHeight / 2));
+      return window.scrollY;
+    }, y).catch(() => 0);
+    await page.mouse.click(x, y - scrollY);
   }
 
   async function poll() {
@@ -152,10 +169,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
           const r = await poll();
           for (const input of r.inputs || []) {
             if (input.type === 'click') {
-              const vp = page.viewportSize();
-              const fx = Math.min(Math.max(Number(input.fx) || 0, 0), 1);
-              const fy = Math.min(Math.max(Number(input.fy) || 0, 0), 1);
-              await page.mouse.click(fx * vp.width, fy * vp.height);
+              await tapAt(Number(input.fx) || 0, Number(input.fy) || 0);
               lastFrame = 0; // show the result of the tap right away
             } else if (input.type === 'scroll') {
               await page.mouse.wheel(0, Math.max(-2000, Math.min(2000, Number(input.dy) || 0)));
