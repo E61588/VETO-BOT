@@ -26,9 +26,23 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 // The bot's browser is phone-shaped, so the picture the user sees on a phone
 // is nearly life size and boxes like "I'm not a robot" are big enough to tap.
 // BOT_VIEWPORT=desktop brings back the wide 1024 px window.
-const VIEWPORT = process.env.BOT_VIEWPORT === 'desktop'
+// BOT_HEADFUL=1 (the team computer): the browser window is visible, desktop
+// sized, and comes to the front when a person is needed, so the team ticks
+// "I'm not a robot" right in it.
+const HEADFUL = process.env.BOT_HEADFUL === '1';
+const VIEWPORT = HEADFUL || process.env.BOT_VIEWPORT === 'desktop'
   ? { width: 1024, height: 900 }
   : { width: 412, height: 780 };
+
+// Terminal bell and, on a Mac, a notification with a sound.
+function alertTeam(message) {
+  process.stdout.write('\x07');
+  if (process.platform !== 'darwin') return;
+  try {
+    const text = String(message).replace(/["\\]/g, '');
+    require('child_process').execFile('osascript', ['-e', `display notification "${text}" with title "VETO" sound name "Glass"`], () => {});
+  } catch { /* no notification */ }
+}
 
 function hostAllowed(raw) {
   try {
@@ -140,7 +154,11 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
     // BROWSER_CHANNEL=chrome uses the computer's installed Google Chrome
     // (local worker on a Mac) instead of Playwright's downloaded Chromium.
     const channel = process.env.BROWSER_CHANNEL === 'chrome' ? { channel: 'chrome' } : {};
-    browser = await chromium.launch({ headless: true, args: ['--lang=he-IL'], ...channel });
+    browser = await chromium.launch({
+      headless: !HEADFUL,
+      args: ['--lang=he-IL', ...(HEADFUL ? [`--window-size=${VIEWPORT.width + 20},${VIEWPORT.height + 120}`] : [])],
+      ...channel,
+    });
     const context = await browser.newContext({
       locale: 'he-IL', timezoneId: 'Asia/Jerusalem', viewport: VIEWPORT,
     });
@@ -161,6 +179,11 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
       // The bot sends screenshots; the person's taps come back through poll.
       async needHuman(message, isDone) {
         await status('AWAITING_HUMAN', message);
+        if (HEADFUL) {
+          await page.bringToFront().catch(() => {});
+          alertTeam(message);
+          console.log(`[job ${jobId}] >>> ${message} — בחלון Chrome שנפתח`);
+        }
         const end = Date.now() + HUMAN_TIMEOUT;
         let lastFrame = 0;
         while (Date.now() < end) {
@@ -184,6 +207,7 @@ async function runTask({ bridge, jobId, allowLiveSubmit, timings = {} }) {
 
       // The authority sent a code to the vehicle owner's phone or email.
       async needOtp(message) {
+        if (HEADFUL) alertTeam('צריך קוד SMS');
         const expires = new Date(Date.now() + HUMAN_TIMEOUT).toISOString();
         await status('AWAITING_OTP', message, { otp_expires_at: expires });
         const end = Date.now() + HUMAN_TIMEOUT;

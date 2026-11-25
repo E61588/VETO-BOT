@@ -54,6 +54,10 @@ elif [ ! -f runtime/.chromium-ok ]; then
 fi
 export PLAYWRIGHT_BROWSERS_PATH="$PWD/runtime/browsers"
 
+# The team computer: the bot's Chrome window is visible and comes to the front
+# when "I'm not a robot" needs ticking. BOT_HEADFUL=0 in .env turns it off.
+grep -q '^BOT_HEADFUL=' .env || echo 'BOT_HEADFUL=1' >> .env
+
 echo
 # caffeinate keeps the Mac awake while the bot runs (closing the lid still sleeps it).
 caffeinate -i node worker.js
