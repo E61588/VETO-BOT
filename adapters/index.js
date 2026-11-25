@@ -6,6 +6,7 @@
 //             it does not know yet, rather than guess.
 const adapters = [
   require('./metropark'),
+  require('./jerusalem'),
 ];
 
 // Local self-test only (npm test). Never enabled in production.
